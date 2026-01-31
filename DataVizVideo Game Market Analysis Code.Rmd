@@ -1,0 +1,429 @@
+---
+title: "Data Visualization with Video Game Sales Performance Dataset"
+author: "Ly Minh Chau Tran"
+date: "2025-12-05"
+output: pdf_document
+---
+
+# Introduction
+
+*The **Entertainment Industry Analytics - Video Game Market dataset** contains game sales data for a store that exports various products across Europe, North America, Japan, Others and Global. It includes key features:*
+
+-   ***Game characteristics*** (name, platform, genre, publisher)
+-   ***Market performance*** (global sales, regional sales breakdown
+-   ***Temporal data*** (release year)
+-   ***Competitive landscape*** (publisher rankings, platform dominance)
+
+# Load the Dataset
+
+First, load the **necessary libraries** and import the dataset. Ensure that the file path is correct running the code below. This is in the read_csv
+
+```{r setup, warning=FALSE, message=FALSE}
+# Clear workspace and load core libraries
+rm(list=ls())
+library(tidyverse) # Includes dplyr, ggplot2, readr, etc.
+library(readxl) 
+library(scales)
+# Define the non-deprecated scale function for sales (Millions/Billions)
+sales_scale_format <- scales::label_number(scale_cut = cut_short_scale())
+# Load the data - NOTE: Update the file path as needed.
+data <- read_csv("D:/Msc. BA/DATA VISUALISATION/Option C.csv")
+head(data)
+# Initial Data Cleaning and Preparation: Convert sales columns to numeric
+data_cleaned <- data %>%
+  mutate(across(ends_with("_Sales"), as.numeric))
+```
+
+# Compute Summary Statistics
+
+Now, calculate summary statistics for Global/EU/NA/JP and other countries sales to get a sense of the dataset's distribution.
+
+```{r}
+summary(data_cleaned)
+
+# Filter out rows where Year is N/A and convert Year to numeric
+data_filtered <- data_cleaned %>%
+  filter(!is.na(Year)) %>%
+  mutate(Year = suppressWarnings(as.numeric(Year)))
+
+# Compute summary statistics before and after filtering
+summary_before_filter <- data_cleaned %>%
+  summarise(
+    Total_Games = n(),
+    Missing_Years = sum(is.na(Year)),
+    Total_Global_Sales = sum(Global_Sales, na.rm = TRUE),
+    Average_Global_Sales = mean(Global_Sales, na.rm = TRUE),
+    Median_Global_Sales = median(Global_Sales, na.rm = TRUE),
+    Total_NA_Sales = sum(NA_Sales, na.rm = TRUE),
+    Total_EU_Sales = sum(EU_Sales, na.rm = TRUE),
+    Total_JP_Sales = sum(JP_Sales, na.rm = TRUE),
+    Unique_Publishers = n_distinct(Publisher, na.rm = TRUE),
+    Unique_Platforms = n_distinct(Platform, na.rm = TRUE),
+    Unique_Genres = n_distinct(Genre, na.rm = TRUE)
+  )
+
+summary_after_filter <- data_filtered %>%
+  summarise(
+    Total_Games = n(),
+    Missing_Years = sum(is.na(Year)), # Should be 0 after filter
+    Total_Global_Sales = sum(Global_Sales, na.rm = TRUE),
+    Average_Global_Sales = mean(Global_Sales, na.rm = TRUE),
+    Median_Global_Sales = median(Global_Sales, na.rm = TRUE),
+    Total_NA_Sales = sum(NA_Sales, na.rm = TRUE),
+    Total_EU_Sales = sum(EU_Sales, na.rm = TRUE),
+    Total_JP_Sales = sum(JP_Sales, na.rm = TRUE),
+    Unique_Publishers = n_distinct(Publisher, na.rm = TRUE),
+    Unique_Platforms = n_distinct(Platform, na.rm = TRUE),
+    Unique_Genres = n_distinct(Genre, na.rm = TRUE)
+  )
+
+# Transpose and combine results for comparison
+comparison_df <- data.frame(
+  Indicator = names(summary_before_filter),
+  Before_Filter = t(summary_before_filter)[, 1],
+  After_Filter = t(summary_after_filter)[, 1],
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    Before_Filter = as.numeric(Before_Filter),
+    After_Filter = as.numeric(After_Filter),
+    Percentage_Loss = round(((Before_Filter - After_Filter) / Before_Filter) * 100, 2)
+  )
+
+# Round values for display
+comparison_df <- comparison_df %>%
+  mutate(
+    Before_Filter = case_when(
+      str_detect(Indicator, "Total_") ~ round(Before_Filter, 2),
+      str_detect(Indicator, "Average|Median") ~ round(Before_Filter, 4),
+      TRUE ~ round(Before_Filter, 0)
+    ),
+    After_Filter = case_when(
+      str_detect(Indicator, "Total_") ~ round(After_Filter, 2),
+      str_detect(Indicator, "Average|Median") ~ round(After_Filter, 4),
+      TRUE ~ round(After_Filter, 0)
+    )
+  )
+
+print(comparison_df)
+
+```
+
+The difference in statistics is minor, confirming that dropping the **1.63%** of rows with missing `Year` is a safe data cleaning practice. Therefore, I will use `data_filtered` for all time-series analysis.
+
+# OVERVIEW:
+
+## Key Performance Drivers:
+
+### Question: Which genres and platforms show strongest growth?
+
+```{r}
+# CREATE TIME PERIOD GROUPS (Decades)
+# ============================================================================
+
+# Add Period column to the filtered data
+data_with_periods <- data_filtered %>%
+  mutate(
+    # Year is already numeric from the previous step, ensuring no NAs
+    Period = case_when(
+      Year >= 1980 & Year < 1985 ~ "1980-1984",
+      Year >= 1985 & Year < 1990 ~ "1985-1989",
+      Year >= 1990 & Year < 1995 ~ "1990-1994",
+      Year >= 1995 & Year < 2000 ~ "1995-1999",
+      Year >= 2000 & Year < 2005 ~ "2000-2004",
+      Year >= 2005 & Year < 2010 ~ "2005-2009",
+      Year >= 2010 & Year < 2015 ~ "2010-2014",
+      Year >= 2015 & Year <= 2020 ~ "2015-2020",
+      TRUE ~ "Other" # Should be empty due to filter, but safe
+    ),
+    Period = factor(Period, levels = c(
+      "1980-1984", "1985-1989", "1990-1994", "1995-1999",
+      "2000-2004", "2005-2009", "2010-2014", "2015-2020"
+    ))
+  ) %>%
+  filter(Period != "Other") # Remove any remaining 'Other' periods
+
+# Check period distribution
+print("=== GAMES BY TIME PERIOD ===")
+period_summary <- data_with_periods %>%
+  group_by(Period) %>%
+  summarise(
+    Game_Count = n(),
+    Total_Sales = sum(Global_Sales, na.rm = TRUE),
+    Avg_Sales = mean(Global_Sales, na.rm = TRUE)
+  )
+print(period_summary)
+
+print(paste("Dataset cleaned and filtered:", nrow(data_with_periods), "games with valid years and periods"))
+```
+
+```{r}
+# Fig 1: Genre Heatmap by Period
+
+genre_period_matrix <- data_with_periods %>%
+  group_by(Genre, Period) %>%
+  summarise(Total_Sales = sum(Global_Sales, na.rm = TRUE), .groups = "drop")
+
+ggplot(genre_period_matrix, aes(x = Period, y = Genre, fill = Total_Sales)) +
+  geom_tile(color = "white") +
+  # Use 2 decimal places for text labels for consistency with sales scale
+  geom_text(aes(label = round(Total_Sales, 0)), 
+            color = "white", size = 4, fontface = "bold") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue",
+                      name = "Total Sales\n(M USD)",
+                      labels = sales_scale_format) +
+  labs(title = "Genre Performance Heatmap by 5-Year Period",
+       subtitle = "Darker colors = higher sales",
+       x = "Year of Release Period",
+       y = "Genre") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", size = 18),
+        axis.text.x = element_text(size = 10, angle = 0, hjust = 0.5),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 14),
+        legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12))
+```
+
+```{r}
+# Fig 2: Annual Global Sales Trend for Top 10 Platforms (1980-2020)
+
+top_platforms <- data_with_periods %>%
+  group_by(Platform) %>%
+  summarise(Total_Sales = sum(Global_Sales, na.rm = TRUE)) %>%
+  slice_max(order_by = Total_Sales, n = 10) %>%
+  pull(Platform)
+
+platform_sales_yearly <- data_with_periods %>%
+  filter(Platform %in% top_platforms) %>%
+  group_by(Year, Platform) %>%
+  summarise(Total_Sales = sum(Global_Sales, na.rm = TRUE), .groups = 'drop')
+
+ggplot(platform_sales_yearly, aes(x = Year, y = Total_Sales, group = Platform)) +
+  geom_line(color = "darkorange", linewidth = 1) +
+  geom_point() +
+  geom_area(alpha = 0.15, fill = "darkorange") +
+  facet_wrap(~ Platform, scales = "free_y", ncol = 3) +
+  scale_y_continuous(labels = sales_scale_format) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 5)) + # Better x-axis labels
+  labs(
+    title = "Annual Global Sales Trend for Top 10 Platforms (1980-2020)",
+    subtitle = "Faceted view shows growth, peak, and decline of the industry's highest-selling platforms",
+    x = "Year of Release",
+    y = "Total Global Sales (Millions USD)"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 11),
+    strip.text = element_text(face = "bold", size = 12),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10), # Adjusted for space
+    axis.text.y = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+### Question: How do different groups/categories perform? How do regional preferences differ?
+
+```{r}
+# Fig 3: Consumer Preferences: Regional Sales Distribution by Platform and Genre
+
+prepare_regional_data <- function(data, group_var, n_top) {
+  # Calculate regional sales
+  regional_sales <- data %>%
+    group_by({{ group_var }}) %>%
+    summarise(
+      Global_Sales = sum(Global_Sales, na.rm = TRUE),
+      NA_Sales = sum(NA_Sales, na.rm = TRUE),
+      EU_Sales = sum(EU_Sales, na.rm = TRUE),
+      JP_Sales = sum(JP_Sales, na.rm = TRUE),
+      Other_Sales = sum(Other_Sales, na.rm = TRUE)
+    )
+
+  # Determine top N by Global Sales
+  top_n_names <- regional_sales %>%
+    slice_max(order_by = Global_Sales, n = n_top) %>%
+    pull({{ group_var }})
+    
+  # Pivot to long format for top N
+  regional_long_top_n <- regional_sales %>%
+    filter({{ group_var }} %in% top_n_names) %>%
+    pivot_longer(
+      cols = ends_with("_Sales"),
+      names_to = "Region_Code",
+      values_to = "Sales"
+    ) %>%
+    mutate(
+      Region = factor(case_when(
+        Region_Code == "Global_Sales" ~ "Global (G)",
+        Region_Code == "NA_Sales" ~ "North America (NA)",
+        Region_Code == "EU_Sales" ~ "Europe (EU)",
+        Region_Code == "JP_Sales" ~ "Japan (JP)",
+        Region_Code == "Other_Sales" ~ "Other"
+      ), levels = c("Global (G)", "North America (NA)", "Europe (EU)", "Japan (JP)", "Other")),
+      Category = rlang::as_label(enquo(group_var)) # Dynamically set Category name
+    ) %>%
+    rename(Name = {{ group_var }})
+  
+  return(regional_long_top_n)
+}
+
+platform_regional_top10 <- prepare_regional_data(data_with_periods, Platform, 10)
+genre_regional_top10 <- prepare_regional_data(data_with_periods, Genre, 10)
+
+
+combined_regional_data <- bind_rows(platform_regional_top10, genre_regional_top10)
+
+# Add Highlight Flag (find max sales within each Region/Category combination)
+combined_regional_highlight <- combined_regional_data %>%
+  group_by(Region, Category) %>%
+  mutate(
+    max_sales = max(Sales, na.rm = TRUE),
+    Highlight = ifelse(Sales == max_sales, "Best Performing", "Other"),
+    Fill_Group = factor(paste(Category, Highlight, sep = "_"))
+  ) %>%
+  ungroup()
+
+# Create Custom Color Palette
+custom_colors <- c(
+  "Genre_Best Performing" = "darkblue",
+  "Genre_Other" = "lightblue",
+  "Platform_Best Performing" = "orange4",
+  "Platform_Other" = "orange1"
+)
+
+ggplot(combined_regional_highlight,
+                                      aes(x = reorder(Name, Sales),
+                                          y = Sales,
+                                          fill = Fill_Group)) +
+  
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  
+  facet_grid(Category ~ Region, scales = "free", space = "free_y") +
+  
+  scale_y_continuous(labels = sales_scale_format) +
+  
+  scale_fill_manual(
+    name = "Performance",
+    values = custom_colors,
+    labels = c(
+      "Genre_Best Performing" = "Genre (Best)",
+      "Genre_Other" = "Genre (Other)",
+      "Platform_Best Performing" = "Platform (Best)",
+      "Platform_Other" = "Platform (Other)"
+    )
+  ) +
+  
+  labs(
+    title = "Consumer Preferences: Regional Sales Distribution by Platform & Genre",
+    subtitle = "The best performing Platform/Genre = a dark shade",
+    x = "Platform / Genre",
+    y = "Total Sales (Millions USD)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(size = 9),
+    axis.text.x = element_text(size = 10),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 12)
+  )
+```
+
+```{r}
+# Fig 4: Publisher Success Matrix: Regional Performance
+
+# Define sales columns
+regional_sales_cols <- c("Global_Sales", "NA_Sales", "EU_Sales", "JP_Sales")
+
+publisher_metrics <- data_cleaned %>%
+  group_by(Publisher) %>%
+  summarise(
+    Total_Games = n(),
+    Total_Global_Sales = sum(Global_Sales, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # Filter for >= 50 games and Top 10 Global Publishers
+  filter(Total_Games >= 50) %>%
+  slice_max(order_by = Total_Global_Sales, n = 10) %>%
+  pull(Publisher)
+
+
+regional_publisher_metrics <- data_cleaned %>%
+  filter(Publisher %in% publisher_metrics) %>%
+  select(Publisher, all_of(regional_sales_cols)) %>%
+  pivot_longer(
+    cols = all_of(regional_sales_cols),
+    names_to = "Region_Code",
+    values_to = "Sales"
+  ) %>%
+  group_by(Publisher, Region_Code) %>%
+  summarise(
+    Game_Count = n(),
+    Total_Sales = sum(Sales, na.rm = TRUE),
+    # Success defined as sales >= 1M in the regional market
+    Success_Count = sum(Sales >= 1), 
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Avg_Sales_Per_Game = Total_Sales / Game_Count,
+    Success_Rate = Success_Count / Game_Count * 100,
+    Facet_Region = factor(
+      case_when(
+        Region_Code == "Global_Sales" ~ "Global (Total Success)",
+        Region_Code == "NA_Sales" ~ "North America (NA)",
+        Region_Code == "EU_Sales" ~ "Europe (EU)",
+        Region_Code == "JP_Sales" ~ "Japan (JP)"
+      ), 
+      levels = c("Global (Total Success)", "North America (NA)", "Europe (EU)", "Japan (JP)")
+    )
+  ) %>%
+  # Remove rows where metrics cannot be computed (e.g., zero games, though filtered out)
+  filter(!is.na(Avg_Sales_Per_Game), !is.nan(Success_Rate))
+
+
+ggplot(regional_publisher_metrics,
+                                        aes(x = Avg_Sales_Per_Game,
+                                            y = Success_Rate,
+                                            size = Total_Sales,
+                                            color = Publisher)) +
+  
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "black", 
+              linetype = "dotted", linewidth = 0.7) +
+  
+  # Label the bubbles only in the Global facet
+  geom_text(data = regional_publisher_metrics %>% filter(Region_Code == "Global_Sales"),
+            aes(label = Publisher), size = 4, color = "black", 
+            vjust = -1, hjust = 0.5, show.legend = FALSE) +
+  
+  facet_wrap(~ Facet_Region, scales = "free", ncol = 2) +
+  
+  scale_size_continuous(name = "Total Regional Sales (M USD)",
+                        labels = scales::label_number(scale_cut = scales::cut_short_scale()),
+                        range = c(5, 25)) +
+  # Use generic number label for x and y, as cut_short_scale is in the size legend
+  scale_x_continuous(labels = scales::label_number()) +
+  scale_y_continuous(labels = scales::label_number()) + 
+  
+  labs(
+    title = "Publisher Success Matrix: Regional Performance",
+    subtitle = "Efficiency (Avg Sales) vs. Consistency (Success Rate), faceted by Region. Bubble size = Total Sales in that region.",
+    x = "Average Sales per Game in Region (Millions USD)",
+    y = "Regional Success Rate (% games >1M in Region)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 20),
+    strip.text = element_text(face = "bold", size = 16),
+    legend.position = "right",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 11)
+  )
+
+```
